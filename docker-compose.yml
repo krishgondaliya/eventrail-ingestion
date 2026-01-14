@@ -33,6 +33,9 @@ services:
       dockerfile: docker/Dockerfile
     ports:
       - "8080:8080"
+    environment:
+      POSTGRES_DSN: postgres://eventrail:eventrail@postgres:5432/eventrail
+      REDIS_ADDR: redis:6379
     depends_on:
       postgres:
         condition: service_healthy
