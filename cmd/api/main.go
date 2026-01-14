@@ -6,8 +6,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -77,13 +79,15 @@ func main() {
 	})
 
 	// --------------------
-	// POST /events
+	// POST /events (idempotent)
 	// --------------------
 	http.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+
+		idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 
 		var req CreateEventRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -99,25 +103,27 @@ func main() {
 		var eventID string
 		err := pgPool.QueryRow(
 			context.Background(),
-			`INSERT INTO events (event_type, source, payload)
-			 VALUES ($1, $2, $3)
+			`INSERT INTO events (event_type, source, payload, idempotency_key)
+			 VALUES ($1, $2, $3, $4)
+			 ON CONFLICT (source, idempotency_key)
+			 WHERE idempotency_key IS NOT NULL
+			 DO UPDATE SET source = EXCLUDED.source
 			 RETURNING id`,
 			req.EventType,
 			req.Source,
 			req.Payload,
+			nilIfEmpty(idempotencyKey),
 		).Scan(&eventID)
 
 		if err != nil {
-			log.Printf("failed to insert event: %v", err)
+			log.Printf("failed to persist event: %v", err)
 			http.Error(w, "failed to persist event", http.StatusInternalServerError)
 			return
 		}
 
-		resp := CreateEventResponse{ID: eventID}
-
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(CreateEventResponse{ID: eventID})
 	})
 
 	// --------------------
@@ -129,8 +135,7 @@ func main() {
 			return
 		}
 
-		// Expected path: /events/{id}
-		id := r.URL.Path[len("/events/"):]
+		id := strings.TrimPrefix(r.URL.Path, "/events/")
 		if id == "" {
 			http.Error(w, "event id required", http.StatusBadRequest)
 			return
@@ -151,8 +156,13 @@ func main() {
 			&evt.CreatedAt,
 		)
 
-		if err != nil {
+		if err == pgx.ErrNoRows {
 			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		if err != nil {
+			http.Error(w, "failed to fetch event", http.StatusInternalServerError)
 			return
 		}
 
@@ -162,4 +172,11 @@ func main() {
 
 	log.Println("EventRail API starting on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
