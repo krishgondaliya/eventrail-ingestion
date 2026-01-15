@@ -8,6 +8,13 @@ It provides idempotency guarantees, durable storage, fan-out delivery, retry wit
 
 > Think of EventRail as a simplified, developer-friendly alternative to internal event pipelines.
 
+## Docker Image
+
+EventRail is published as a Docker image via GitHub Container Registry.
+
+```bash
+docker pull ghcr.io/krishgondaliya/eventrail:latest
+
 ---
 
 ## Architecture Overview
@@ -101,7 +108,7 @@ Make sure you have:
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/<your-username>/eventrail-ingestion.git
+git clone https://github.com/krishgondaliya/eventrail-ingestion.git
 cd eventrail-ingestion
 ```
 
